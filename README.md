@@ -1,5 +1,7 @@
 # java-2c-db
 
+[source](https://github.com/SZabirov/javalab_db)
+
 ## Lessons
 
 1. basics of SQL SELECT in [lesson-01](/lesson-01)
