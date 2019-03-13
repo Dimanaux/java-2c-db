@@ -29,7 +29,7 @@ SELECT *
 FROM resource r
        INNER JOIN selected ON r.id = selected.resource_id;
 
-WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
-SELECT r.id, r.link
+WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
+SELECT r.*
 FROM resource r
        INNER JOIN selected ON r.id = selected.resource_id;
