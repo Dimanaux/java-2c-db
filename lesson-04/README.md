@@ -103,10 +103,12 @@ SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти 
 
 Подзапрос занимает значительную часть времени, необходимо его ускорить.
 Я вижу несколько оптимизаций:
+
     - для каждого тега создать MATERIALIZED VIEW выборку из resource_tag и таком запросе делать объединение таких view. (слишком сложно)
     - добавить индекс для resource_tag.tag_id
     - ограничить максимальное количество тегов для одного ресурса числом 5 или 10
     - использовать графовую СУБД вместо реляционной
+
 Очевидно, что необходима оптимизация первого подзапроса, т.к. большая часть времени уходит на его обработку.
 
 ## Создаём индекс
@@ -132,7 +134,6 @@ SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти 
 (13 rows)
 ```
 Время выполнения подзапроса уменьшилось до 9 секунд!
-
 ```
 =# EXPLAIN ANALYZE WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
 -# SELECT *
@@ -163,8 +164,6 @@ SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти 
 (20 rows)
 ```
 Также замена конструкции tag_id IN (...) на tag_id = 1 OR tag_id = 2 OR ... немного ускоряет запрос.
-
-
 ```
 =# EXPLAIN ANALYZE WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
 -# SELECT *
@@ -202,7 +201,7 @@ SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти 
 
 Исключение ключевого слова DISTINCT значительно ускоряет выполнение всего запроса.
 
-Самая мощная оптимизация спросить, а сколько ресурсов мы хотим получить зараз?
+Самая мощная оптимизация - спросить, а сколько ресурсов мы хотим получить зараз?
 Например, если ограничить число ресурсов сотней, то получится 2 милисекунды (+ планирование 50 милисекунд).
 ```
 =# EXPLAIN ANALYZE WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4) LIMIT 100)
@@ -228,4 +227,5 @@ SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти 
 ## Добавление второго индекса
 `CREATE INDEX CONCURRENTLY ON resource_tag (resource_id);`
 Размер базы данных вырос до 7775MB.
+
 Как ни странно, запрос стал выполнятся слегка медленнее.
