@@ -10,4 +10,4 @@
 
 3. more inheritance, partitioning (and cron) in [lesson 3](/lesson-03)
 
-4. filling tables with java, EXPLAIN usage, tags (business) in [lesson 4](/lesson-04)
+4. filling tables with java, EXPLAIN usage, many2many in [lesson 4](/lesson-04)
