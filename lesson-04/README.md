@@ -96,10 +96,12 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
 
 Подзапрос занимает значительную часть времени, необходимо его ускорить.
 Я вижу несколько оптимизаций:
+
     - для каждого тега создать MATERIALIZED VIEW выборку из resource_tag и таком запросе делать объединение таких view. (слишком сложно)
     - добавить индекс для resource_tag.tag_id
     - ограничить максимальное количество тегов для одного ресурса (например числом 5 или 10)
     - использовать графовую СУБД вместо реляционной
+
 Очевидно, что необходима оптимизация первого подзапроса, т.к. большая часть времени уходит на его обработку.
 
 ## Создаём индекс
@@ -136,6 +138,7 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
  Planning Time: 0.278 ms
  Execution Time: 9962.033 ms
 ```
+
 Время выполнения подзапроса увеличилось ненамного.
 
 ```
@@ -174,7 +177,6 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
 ```
 Также замена конструкции `tag_id IN (...)` на `tag_id = 1 OR tag_id = 2 OR ...` немного ускоряет запрос.
 
-
 ```
 java=# EXPLAIN ANALYZE
 java-# WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
@@ -211,6 +213,7 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
 Исключение ключевого слова `DISTINCT` не ускоряет выполнение значительно.
 
 Ограничение числа ресурсов не сильно ускоряет запрос.
+
 ```
 java=# EXPLAIN ANALYZE
 java-# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4) LIMIT 60)
@@ -241,6 +244,7 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
 ## Добавление второго индекса
 `CREATE INDEX CONCURRENTLY ON resource_tag (resource_id);`
 Размер базы данных вырос до 7775 MB.
+
 Как ни странно, запрос стал выполнятся слегка медленнее.
 
 ОДНАКО сочетание с ограничением числа ресурсов дало невероятную производительность. Время выполнения сократилось до 270 милисекунд.
@@ -277,4 +281,3 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
 400 тегов.
 1 миллион ресурсов.
 21 миллон отношений. (~ 11% от требования)
-
