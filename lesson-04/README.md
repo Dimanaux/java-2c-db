@@ -267,3 +267,14 @@ java-#        INNER JOIN selected ON r.id = selected.resource_id;
  Planning Time: 0.218 ms
  Execution Time: 276.270 ms
 ```
+
+# Graph Database
+Я использовал Neo4J.
+
+Запрос из файла task.cypher выполняется за 812 милисекунд.
+
+База данных была заполнена так:
+400 тегов.
+1 миллион ресурсов.
+21 миллон отношений. (~ 11% от требования)
+
