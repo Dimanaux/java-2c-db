@@ -18,214 +18,252 @@
 
 # Работа
 ## Подготовка данных
-0. Убедиться, что на диске достаточно места. При текущих настройках необходимо до 3.5GB
+0. Убедиться, что на диске достаточно места. При текущих настройках необходимо до 3512 MB
 1. Создать базу данных
 2. В файле `Main.java` в процедуре `main` заменить переменные `databaseName`, `username` и `password` на необходимые
 3. Запустить
     - mvn compile
     - mvn exec:java
 
+Таблица resource_tag заполнялась 1ч 43 мин. (Generic SSD)
+
 ## Анализ
 1. Придумать запрос
-2. Выполнить `EXPLAIN <запрос>`
+2. Выполнить `EXPLAIN ANALYZE <запрос>`
 3. Предложить улучшения структуры данных или запроса для ускорения выборки.
 
-```
-SELECT COUNT(1) FROM resource_tag; -- сколько записей в таблице tag?
-SELECT pg_size_pretty(pg_database_size('java')); -- сколько памяти нужно для хранения базы данных?
-```
+`SELECT COUNT(1) FROM resource_tag;` -- сколько записей в таблице tag?
+`SELECT pg_size_pretty(pg_database_size('java'));` -- сколько памяти нужно для хранения базы данных?
 
 ## Результаты
+В таблице resource_tag 99 миллионов записей (99 497 980).
 Мой запрос выполняется очень долго.
+Время также сильно разнится
 
 ### Subquery
+Перед контрольными запросами я сделал несколько подобных запросов с другими параметрами.
 ```
-=# EXPLAIN ANALYZE SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4);
-                                                                  QUERY PLAN
------------------------------------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=1164830.79..1165615.83 rows=78504 width=4) (actual time=40244.120..40451.282 rows=665182 loops=1)
+java=# EXPLAIN ANALYZE SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (11, 16, 18, 20);
+ HashAggregate  (cost=1164848.71..1165643.64 rows=79493 width=4) (actual time=8319.339..8458.052 rows=665221 loops=1)
    Group Key: resource_id
-   ->  Gather  (cost=1000.00..1162352.28 rows=991406 width=4) (actual time=2.320..39246.706 rows=993756 loops=1)
+   ->  Gather  (cost=1000.00..1162367.52 rows=992475 width=4) (actual time=1.622..7771.679 rows=994854 loops=1)
          Workers Planned: 2
          Workers Launched: 2
-         ->  Parallel Seq Scan on resource_tag  (cost=0.00..1062211.68 rows=413086 width=4) (actual time=0.281..39458.059 rows=331252 loops=3)
-               Filter: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-               Rows Removed by Filter: 32837595
- Planning Time: 0.403 ms
- Execution Time: 40507.978 ms
-(10 rows)
+         ->  Parallel Seq Scan on resource_tag  (cost=0.00..1062120.02 rows=413531 width=4) (actual time=0.347..7937.630 rows=331618 loops=3)
+               Filter: (tag_id = ANY ('{11,16,18,20}'::integer[]))
+               Rows Removed by Filter: 32834375
+ Planning Time: 0.122 ms
+ Execution Time: 8490.495 ms
 
-=# EXPLAIN ANALYZE SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2);
-                                                                  QUERY PLAN
-----------------------------------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=1010368.45..1011152.09 rows=78364 width=4) (actual time=39862.734..39995.992 rows=430183 loops=1)
+java=# EXPLAIN ANALYZE SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (30, 50);
+ HashAggregate  (cost=1010340.48..1011133.89 rows=79341 width=4) (actual time=7297.768..7390.765 rows=430540 loops=1)
    Group Key: resource_id
-   ->  Gather  (cost=1000.00..1009129.20 rows=495703 width=4) (actual time=11.508..39191.429 rows=496556 loops=1)
+   ->  Gather  (cost=1000.00..1009099.89 rows=496237 width=4) (actual time=1.575..6979.329 rows=497251 loops=1)
          Workers Planned: 2
          Workers Launched: 2
-         ->  Parallel Seq Scan on resource_tag  (cost=0.00..958558.90 rows=206543 width=4) (actual time=2.393..39296.007 rows=165519 loops=3)
-               Filter: (tag_id = ANY ('{1,2}'::integer[]))
-               Rows Removed by Filter: 33003328
- Planning Time: 0.634 ms
- Execution Time: 40036.719 ms
-(10 rows)
+         ->  Parallel Seq Scan on resource_tag  (cost=0.00..958476.19 rows=206765 width=4) (actual time=0.369..7073.741 rows=165750 loops=3)
+               Filter: (tag_id = ANY ('{30,50}'::integer[]))
+               Rows Removed by Filter: 33000243
+ Planning Time: 0.118 ms
+ Execution Time: 7414.197 ms
 ```
-Как мы видим, уменьшение количества параметров не приводит к ускорению выполнения.
+Как мы видим, уменьшение количества параметров приводит к небольшому ускорению выполнения.
 
 ### Full query
 ```
-=# EXPLAIN ANALYZE
--# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
--# SELECT *
--# FROM resource r
--#        INNER JOIN selected ON r.id = selected.resource_id;
-                                                                      QUERY PLAN
--------------------------------------------------------------------------------------------------------------------------------------------------------
- Hash Join  (cost=1198404.83..1205677.98 rows=78504 width=17) (actual time=40779.384..41942.236 rows=665182 loops=1)
+java=# EXPLAIN ANALYZE WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Hash Join  (cost=1209035.35..1216338.87 rows=79493 width=13) (actual time=8438.422..9440.001 rows=665149 loops=1)
    Hash Cond: (selected.resource_id = r.id)
    CTE selected
-     ->  HashAggregate  (cost=1164830.79..1165615.83 rows=78504 width=4) (actual time=40441.404..40607.633 rows=665182 loops=1)
+     ->  HashAggregate  (cost=1175451.42..1176246.35 rows=79493 width=4) (actual time=8115.405..8262.534 rows=665149 loops=1)
            Group Key: resource_tag.resource_id
-           ->  Gather  (cost=1000.00..1162352.28 rows=991406 width=4) (actual time=2.578..39459.479 rows=993756 loops=1)
+           ->  Gather  (cost=1000.00..1172711.63 rows=1095916 width=4) (actual time=0.949..7590.381 rows=996030 loops=1)
                  Workers Planned: 2
                  Workers Launched: 2
-                 ->  Parallel Seq Scan on resource_tag  (cost=0.00..1062211.68 rows=413086 width=4) (actual time=0.235..39676.787 rows=331252 loops=3)
+                 ->  Parallel Seq Scan on resource_tag  (cost=0.00..1062120.02 rows=456632 width=4) (actual time=0.233..7757.638 rows=332010 loops=3)
                        Filter: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-                       Rows Removed by Filter: 32837595
-   ->  CTE Scan on selected  (cost=0.00..1570.08 rows=78504 width=4) (actual time=40441.409..40790.094 rows=665182 loops=1)
-   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=333.003..333.004 rows=1000000 loops=1)
+                       Rows Removed by Filter: 32833983
+   ->  CTE Scan on selected  (cost=0.00..1589.86 rows=79493 width=4) (actual time=8115.410..8406.545 rows=665149 loops=1)
+   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=318.747..318.747 rows=1000000 loops=1)
          Buckets: 131072  Batches: 16  Memory Usage: 3832kB
-         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.573..127.807 rows=1000000 loops=1)
- Planning Time: 6.225 ms
- Execution Time: 41992.261 ms
-(17 rows)
+         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.550..127.882 rows=1000000 loops=1)
+ Planning Time: 28.373 ms
+ Execution Time: 9484.142 ms
 ```
 
 Подзапрос занимает значительную часть времени, необходимо его ускорить.
 Я вижу несколько оптимизаций:
     - для каждого тега создать MATERIALIZED VIEW выборку из resource_tag и таком запросе делать объединение таких view. (слишком сложно)
     - добавить индекс для resource_tag.tag_id
-    - ограничить максимальное количество тегов для одного ресурса числом 5 или 10
+    - ограничить максимальное количество тегов для одного ресурса (например числом 5 или 10)
     - использовать графовую СУБД вместо реляционной
 Очевидно, что необходима оптимизация первого подзапроса, т.к. большая часть времени уходит на его обработку.
 
 ## Создаём индекс
 `CREATE INDEX CONCURRENTLY ON resource_tag(tag_id);`
-База данных выросла до 5.5GB.
-```
-=# EXPLAIN ANALYZE SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4);
-                                                                           QUERY PLAN
-----------------------------------------------------------------------------------------------------------------------------------------------------------------
- HashAggregate  (cost=1137519.86..1138304.90 rows=78504 width=4) (actual time=8689.645..8850.513 rows=665182 loops=1)
-   Group Key: resource_id
-   ->  Gather  (cost=19513.65..1135041.35 rows=991404 width=4) (actual time=258.802..8147.353 rows=993756 loops=1)
-         Workers Planned: 2
-         Workers Launched: 2
-         ->  Parallel Bitmap Heap Scan on resource_tag  (cost=18513.65..1034900.95 rows=413085 width=4) (actual time=172.003..8263.111 rows=331252 loops=3)
-               Recheck Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-               Rows Removed by Index Recheck: 27031255
-               Heap Blocks: exact=13296 lossy=113487
-               ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..18265.80 rows=991404 width=0) (actual time=244.546..244.546 rows=993756 loops=1)
-                     Index Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
- Planning Time: 0.226 ms
- Execution Time: 8897.591 ms
-(13 rows)
-```
-Время выполнения подзапроса уменьшилось до 9 секунд!
+База данных выросла до 5643 MB
+
+list indexes
+`SELECT * FROM pg_indexes WHERE tablename NOT LIKE 'pg%';`
 
 ```
-=# EXPLAIN ANALYZE WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
--# SELECT *
--# FROM resource r
--#        INNER JOIN selected ON r.id = selected.resource_id;
-                                                                               QUERY PLAN
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Hash Join  (cost=1171093.90..1178367.05 rows=78504 width=17) (actual time=20117.681..21167.974 rows=665182 loops=1)
+java=# EXPLAIN ANALYZE
+java-# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4))
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Hash Join  (cost=1183723.28..1191026.81 rows=79493 width=13) (actual time=9017.187..9918.579 rows=665149 loops=1)
    Hash Cond: (selected.resource_id = r.id)
    CTE selected
-     ->  HashAggregate  (cost=1137519.86..1138304.90 rows=78504 width=4) (actual time=19778.385..19937.288 rows=665182 loops=1)
+     ->  HashAggregate  (cost=1150139.35..1150934.28 rows=79493 width=4) (actual time=8734.051..8879.006 rows=665149 loops=1)
            Group Key: resource_tag.resource_id
-           ->  Gather  (cost=19513.65..1135041.35 rows=991404 width=4) (actual time=220.157..19087.411 rows=993756 loops=1)
+           ->  Gather  (cost=21463.62..1147399.56 rows=1095915 width=4) (actual time=168.478..8192.122 rows=996030 loops=1)
                  Workers Planned: 2
                  Workers Launched: 2
-                 ->  Parallel Bitmap Heap Scan on resource_tag  (cost=18513.65..1034900.95 rows=413085 width=4) (actual time=81.109..19176.032 rows=331252 loops=3)
+                 ->  Parallel Bitmap Heap Scan on resource_tag  (cost=20463.62..1036808.06 rows=456631 width=4) (actual time=127.521..8354.188 rows=332010 loops=3)
                        Recheck Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-                       Rows Removed by Index Recheck: 27031255
-                       Heap Blocks: exact=13654 lossy=113613
-                       ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..18265.80 rows=991404 width=0) (actual time=204.162..204.162 rows=993756 loops=1)
+                       Rows Removed by Index Recheck: 27030058
+                       Heap Blocks: exact=14101 lossy=116126
+                       ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..20189.64 rows=1095915 width=0) (actual time=157.111..157.111 rows=996030 loops=1)
                              Index Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-   ->  CTE Scan on selected  (cost=0.00..1570.08 rows=78504 width=4) (actual time=19778.389..20111.073 rows=665182 loops=1)
-   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=334.955..334.955 rows=1000000 loops=1)
+   ->  CTE Scan on selected  (cost=0.00..1589.86 rows=79493 width=4) (actual time=8734.054..9025.773 rows=665149 loops=1)
+   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=279.010..279.010 rows=1000000 loops=1)
          Buckets: 131072  Batches: 16  Memory Usage: 3832kB
-         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=5.978..138.983 rows=1000000 loops=1)
- Planning Time: 18.017 ms
- Execution Time: 21222.805 ms
-(20 rows)
+         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.069..110.617 rows=1000000 loops=1)
+ Planning Time: 0.278 ms
+ Execution Time: 9962.033 ms
 ```
-Также замена конструкции tag_id IN (...) на tag_id = 1 OR tag_id = 2 OR ... немного ускоряет запрос.
-
+Время выполнения подзапроса увеличилось ненамного.
 
 ```
-=# EXPLAIN ANALYZE WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
--# SELECT *
--# FROM resource r
--#        INNER JOIN selected ON r.id = selected.resource_id;
-                                                                              QUERY PLAN
------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Hash Join  (cost=1360283.17..1395231.03 rows=987706 width=17) (actual time=572.982..8822.431 rows=993756 loops=1)
+java=# EXPLAIN ANALYZE
+java-# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Hash Join  (cost=1376170.88..1383474.41 rows=79493 width=13) (actual time=8523.880..9416.492 rows=665149 loops=1)
    Hash Cond: (selected.resource_id = r.id)
    CTE selected
-     ->  Gather  (cost=20305.51..1327494.17 rows=987706 width=4) (actual time=276.797..7221.274 rows=993756 loops=1)
+     ->  HashAggregate  (cost=1342586.95..1343381.88 rows=79493 width=4) (actual time=8236.998..8381.641 rows=665149 loops=1)
+           Group Key: resource_tag.resource_id
+           ->  Gather  (cost=22341.06..1339858.35 rows=1091437 width=4) (actual time=163.349..7697.737 rows=996030 loops=1)
+                 Workers Planned: 2
+                 Workers Launched: 2
+                 ->  Parallel Bitmap Heap Scan on resource_tag  (cost=21341.06..1229714.65 rows=454765 width=4) (actual time=125.271..7862.174 rows=332010 loops=3)
+                       Recheck Cond: ((tag_id = 1) OR (tag_id = 2) OR (tag_id = 3) OR (tag_id = 4))
+                       Rows Removed by Index Recheck: 27030058
+                       Heap Blocks: exact=13813 lossy=113667
+                       ->  BitmapOr  (cost=21341.06..21341.06 rows=1095915 width=0) (actual time=151.955..151.955 rows=0 loops=1)
+                             ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=81.367..81.367 rows=248801 loops=1)
+                                   Index Cond: (tag_id = 1)
+                             ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=29.128..29.128 rows=248368 loops=1)
+                                   Index Cond: (tag_id = 2)
+                             ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..6493.27 rows=351560 width=0) (actual time=22.836..22.836 rows=249749 loops=1)
+                                   Index Cond: (tag_id = 3)
+                             ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=18.619..18.619 rows=249112 loops=1)
+                                   Index Cond: (tag_id = 4)
+   ->  CTE Scan on selected  (cost=0.00..1589.86 rows=79493 width=4) (actual time=8237.001..8527.867 rows=665149 loops=1)
+   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=282.595..282.595 rows=1000000 loops=1)
+         Buckets: 131072  Batches: 16  Memory Usage: 3832kB
+         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.065..110.351 rows=1000000 loops=1)
+ Planning Time: 0.162 ms
+ Execution Time: 9459.173 ms
+```
+Также замена конструкции `tag_id IN (...)` на `tag_id = 1 OR tag_id = 2 OR ...` немного ускоряет запрос.
+
+
+```
+java=# EXPLAIN ANALYZE
+java-# WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id = 1 OR tag_id = 2 OR tag_id = 3 OR tag_id = 4)
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Hash Join  (cost=1372647.35..1410752.13 rows=1091437 width=13) (actual time=447.731..8929.914 rows=996030 loops=1)
+   Hash Cond: (selected.resource_id = r.id)
+   CTE selected
+     ->  Gather  (cost=22341.06..1339858.35 rows=1091437 width=4) (actual time=168.695..7349.046 rows=996030 loops=1)
            Workers Planned: 2
            Workers Launched: 2
-           ->  Parallel Bitmap Heap Scan on resource_tag  (cost=19305.51..1227723.57 rows=411544 width=4) (actual time=173.857..7458.690 rows=331252 loops=3)
+           ->  Parallel Bitmap Heap Scan on resource_tag  (cost=21341.06..1229714.65 rows=454765 width=4) (actual time=128.294..7679.641 rows=332010 loops=3)
                  Recheck Cond: ((tag_id = 1) OR (tag_id = 2) OR (tag_id = 3) OR (tag_id = 4))
-                 Rows Removed by Index Recheck: 27031255
-                 Heap Blocks: exact=13318 lossy=109852
-                 ->  BitmapOr  (cost=19305.51..19305.51 rows=991404 width=0) (actual time=260.910..260.910 rows=0 loops=1)
-                       ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..4579.45 rows=247851 width=0) (actual time=177.402..177.402 rows=248655 loops=1)
+                 Rows Removed by Index Recheck: 27030058
+                 Heap Blocks: exact=13602 lossy=110941
+                 ->  BitmapOr  (cost=21341.06..21341.06 rows=1095915 width=0) (actual time=156.078..156.078 rows=0 loops=1)
+                       ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=83.372..83.372 rows=248801 loops=1)
                              Index Cond: (tag_id = 1)
-                       ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..4579.45 rows=247851 width=0) (actual time=33.738..33.738 rows=247901 loops=1)
+                       ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=29.612..29.612 rows=248368 loops=1)
                              Index Cond: (tag_id = 2)
-                       ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..4579.45 rows=247851 width=0) (actual time=27.502..27.502 rows=248792 loops=1)
+                       ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..6493.27 rows=351560 width=0) (actual time=23.342..23.342 rows=249749 loops=1)
                              Index Cond: (tag_id = 3)
-                       ->  Bitmap Index Scan on resource_tag_tag_id_index  (cost=0.00..4579.45 rows=247851 width=0) (actual time=22.262..22.263 rows=248408 loops=1)
+                       ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..4585.45 rows=248118 width=0) (actual time=19.747..19.747 rows=249112 loops=1)
                              Index Cond: (tag_id = 4)
-   ->  CTE Scan on selected  (cost=0.00..19754.12 rows=987706 width=4) (actual time=276.805..7603.981 rows=993756 loops=1)
-   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=293.877..293.877 rows=1000000 loops=1)
+   ->  CTE Scan on selected  (cost=0.00..21828.74 rows=1091437 width=4) (actual time=168.699..7755.264 rows=996030 loops=1)
+   ->  Hash  (cost=15406.00..15406.00 rows=1000000 width=13) (actual time=276.023..276.024 rows=1000000 loops=1)
          Buckets: 131072  Batches: 16  Memory Usage: 3832kB
-         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.040..114.708 rows=1000000 loops=1)
- Planning Time: 1.229 ms
- Execution Time: 8877.230 ms
-(25 rows)
+         ->  Seq Scan on resource r  (cost=0.00..15406.00 rows=1000000 width=13) (actual time=0.039..108.985 rows=1000000 loops=1)
+ Planning Time: 0.286 ms
+ Execution Time: 8977.375 ms
 ```
+Исключение ключевого слова `DISTINCT` в сочетании с использованием `OR` немного ускоряет выполнение всего запроса.
+Исключение ключевого слова `DISTINCT` не ускоряет выполнение значительно.
 
-Исключение ключевого слова DISTINCT значительно ускоряет выполнение всего запроса.
-
-Самая мощная оптимизация спросить, а сколько ресурсов мы хотим получить зараз?
-Например, если ограничить число ресурсов сотней, то получится 2 милисекунды (+ планирование 50 милисекунд).
+Ограничение числа ресурсов не сильно ускоряет запрос.
 ```
-=# EXPLAIN ANALYZE WITH selected AS (SELECT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4) LIMIT 100)
--# SELECT *
--# FROM resource r
--#        INNER JOIN selected ON r.id = selected.resource_id;
-                                                                            QUERY PLAN
--------------------------------------------------------------------------------------------------------------------------------------------------------------------
- Nested Loop  (cost=185.65..1027.47 rows=100 width=17) (actual time=0.320..2.101 rows=100 loops=1)
+java=# EXPLAIN ANALYZE
+java-# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4) LIMIT 60)
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Nested Loop  (cost=1150140.38..1150647.70 rows=60 width=13) (actual time=8395.698..8421.329 rows=60 loops=1)
    CTE selected
-     ->  Limit  (cost=0.57..185.22 rows=100 width=4) (actual time=0.199..1.326 rows=100 loops=1)
-           ->  Index Scan using resource_tag_tag_id_index on resource_tag  (cost=0.57..1830676.54 rows=991404 width=4) (actual time=0.189..1.296 rows=100 loops=1)
-                 Index Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
-   ->  CTE Scan on selected  (cost=0.00..2.00 rows=100 width=4) (actual time=0.211..1.400 rows=100 loops=1)
-   ->  Index Scan using resource_pkey on resource r  (cost=0.42..8.40 rows=1 width=13) (actual time=0.006..0.006 rows=1 loops=100)
+     ->  Limit  (cost=1150139.35..1150139.95 rows=60 width=4) (actual time=8395.469..8419.029 rows=60 loops=1)
+           ->  HashAggregate  (cost=1150139.35..1150934.28 rows=79493 width=4) (actual time=8395.468..8395.499 rows=60 loops=1)
+                 Group Key: resource_tag.resource_id
+                 ->  Gather  (cost=21463.62..1147399.56 rows=1095915 width=4) (actual time=165.671..7883.357 rows=996030 loops=1)
+                       Workers Planned: 2
+                       Workers Launched: 2
+                       ->  Parallel Bitmap Heap Scan on resource_tag  (cost=20463.62..1036808.06 rows=456631 width=4) (actual time=126.222..8024.160 rows=332010 loops=3)
+                             Recheck Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
+                             Rows Removed by Index Recheck: 27030058
+                             Heap Blocks: exact=13543 lossy=112684
+                             ->  Bitmap Index Scan on resource_tag_tag_id_idx  (cost=0.00..20189.64 rows=1095915 width=0) (actual time=154.210..154.210 rows=996030 loops=1)                                   Index Cond: (tag_id = ANY ('{1,2,3,4}'::integer[]))
+   ->  CTE Scan on selected  (cost=0.00..1.20 rows=60 width=4) (actual time=8395.472..8419.079 rows=60 loops=1)
+   ->  Index Scan using resource_pkey on resource r  (cost=0.42..8.44 rows=1 width=13) (actual time=0.037..0.037 rows=1 loops=60)
          Index Cond: (id = selected.resource_id)
- Planning Time: 50.029 ms
- Execution Time: 2.640 ms
-(10 rows)
+ Planning Time: 0.368 ms
+ Execution Time: 8432.285 ms
 ```
 Для тясячи - 51 милисекунда.
 
 ## Добавление второго индекса
 `CREATE INDEX CONCURRENTLY ON resource_tag (resource_id);`
-Размер базы данных вырос до 7775MB.
+Размер базы данных вырос до 7775 MB.
 Как ни странно, запрос стал выполнятся слегка медленнее.
+
+ОДНАКО сочетание с ограничением числа ресурсов дало невероятную производительность. Время выполнения сократилось до 270 милисекунд.
+Выбор 1000 ресурсов.
+```
+java=# EXPLAIN ANALYZE
+java-# WITH selected AS (SELECT DISTINCT resource_id FROM resource_tag WHERE tag_id IN (1, 2, 3, 4) LIMIT 1000)
+java-# SELECT r.*
+java-# FROM resource r
+java-#        INNER JOIN selected ON r.id = selected.resource_id;
+ Nested Loop  (cost=35974.11..43484.18 rows=1000 width=13) (actual time=144.737..276.102 rows=1000 loops=1)
+   CTE selected
+     ->  Limit  (cost=1000.59..35973.68 rows=1000 width=4) (actual time=144.714..268.772 rows=1000 loops=1)
+           ->  Unique  (cost=1000.59..2781116.48 rows=79493 width=4) (actual time=144.713..243.651 rows=1000 loops=1)
+                 ->  Gather Merge  (cost=1000.59..2778376.69 rows=1095915 width=4) (actual time=144.712..267.987 rows=1503 loops=1)
+                       Workers Planned: 2
+                       Workers Launched: 2
+                       ->  Parallel Index Scan using resource_tag_resource_id_idx on resource_tag  (cost=0.57..2650880.89 rows=456631 width=4) (actual time=0.076..89.067 rows=504 loops=3)
+                             Filter: (tag_id = ANY ('{1,2,3,4}'::integer[]))
+                             Rows Removed by Filter: 49460
+   ->  CTE Scan on selected  (cost=0.00..20.00 rows=1000 width=4) (actual time=144.716..269.208 rows=1000 loops=1)
+   ->  Index Scan using resource_pkey on resource r  (cost=0.42..7.49 rows=1 width=13) (actual time=0.006..0.006 rows=1 loops=1000)
+         Index Cond: (id = selected.resource_id)
+ Planning Time: 0.218 ms
+ Execution Time: 276.270 ms
+```
